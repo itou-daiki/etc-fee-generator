@@ -456,10 +456,9 @@ function setupDownloadButton(userName) {
 
 function showPreview(data, headers) {
     const container = document.getElementById("preview-table");
-    const previewData = data.slice(0, 10);
 
     const headerCells = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
-    const rows = previewData
+    const rows = data
         .map((row) => {
             const cells = headers
                 .map((h) => `<td>${escapeHtml(String(row[h] || ""))}</td>`)

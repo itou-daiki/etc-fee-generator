@@ -358,14 +358,16 @@ select:focus {
 /* Preview Table */
 .preview-table-wrapper {
     width: 100%;
-    overflow-x: auto;
+    max-height: 400px;
+    overflow: auto;
     margin: 1rem 0;
     border: 1px solid var(--border);
     border-radius: 6px;
 }
 
 .preview-table-wrapper table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     font-size: 0.8rem;
     white-space: nowrap;
@@ -383,6 +385,7 @@ select:focus {
     font-weight: 600;
     position: sticky;
     top: 0;
+    z-index: 1;
 }
 
 .preview-table-wrapper tr:last-child td {
