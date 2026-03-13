@@ -170,12 +170,17 @@ select:focus {
 }
 
 /* Main Content */
+main {
+    min-width: 0;
+}
+
 .section {
     background: var(--surface);
     border-radius: var(--radius);
     padding: 1.5rem;
     box-shadow: var(--shadow);
     margin-bottom: 1rem;
+    overflow: hidden;
 }
 
 .section h2 {
@@ -357,7 +362,6 @@ select:focus {
 
 /* Preview Table */
 .preview-table-wrapper {
-    width: 100%;
     max-height: 400px;
     overflow: auto;
     margin: 1rem 0;
@@ -366,8 +370,6 @@ select:focus {
 }
 
 .preview-table-wrapper table {
-    width: max-content;
-    min-width: 100%;
     border-collapse: collapse;
     font-size: 0.8rem;
     white-space: nowrap;
