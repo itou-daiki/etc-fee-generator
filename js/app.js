@@ -285,8 +285,11 @@ function calculateAllUsageAmounts(data, year, month) {
 }
 
 // ============================================================
-// Excel Generation
+// Excel Generation (JSZip + direct XML manipulation)
 // ============================================================
+
+const XLSX_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const SHEET_PATH = "xl/worksheets/sheet1.xml";
 
 async function generateExcel() {
     const generateBtn = document.getElementById("generate-btn");
@@ -298,44 +301,38 @@ async function generateExcel() {
     try {
         const settings = readSettings();
 
-        // Load template
-        const templateBuffer = await fetchTemplate();
+        // Load template as zip
+        const response = await fetch("templates/template.xlsx");
+        if (!response.ok) throw new Error("テンプレートファイルの読み込みに失敗しました");
+        const zip = await JSZip.loadAsync(await response.arrayBuffer());
 
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.load(templateBuffer);
+        // Parse sheet XML
+        const sheetXml = await zip.file(SHEET_PATH).async("string");
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(sheetXml, "application/xml");
 
-        const worksheet = workbook.getWorksheet("利用実績簿");
-        if (!worksheet) {
-            throw new Error("テンプレートのワークシート「利用実績簿」が見つかりません");
-        }
+        // Build cell modification map
+        const cellMap = buildCellMap(settings, appState.year, appState.month, appState.csvData);
 
-        // Write header info
-        writeHeaderInfo(worksheet, settings);
+        // Apply modifications
+        applyCellModifications(doc, cellMap);
 
-        // Write date info
-        writeDateInfo(worksheet, appState.year, appState.month);
+        // Serialize back to XML
+        const serializer = new XMLSerializer();
+        const newXml = serializer.serializeToString(doc);
+        zip.file(SHEET_PATH, newXml);
 
-        // Write highway info
-        writeHighwayInfo(worksheet, settings);
+        // Remove calcChain.xml to force Excel to recalculate formulas
+        zip.remove("xl/calcChain.xml");
 
-        // Calculate and write usage data
-        const usageAmounts = calculateAllUsageAmounts(
-            appState.csvData,
-            appState.year,
-            appState.month,
-        );
-        writeUsageData(worksheet, usageAmounts, appState.year, appState.month);
-
-        // Generate downloadable blob
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob([buffer], {
-            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        // Generate blob
+        const blob = await zip.generateAsync({
+            type: "blob",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
         updateState({ generatedBlob: blob });
 
-        // Show download button
         setupDownloadButton(settings.userName);
-
         showMessage("success", "利用実績簿が正常に生成されました！");
         document.getElementById("warnings").classList.remove("hidden");
     } catch (e) {
@@ -358,81 +355,100 @@ function readSettings() {
     });
 }
 
-async function fetchTemplate() {
-    const response = await fetch("templates/template.xlsx");
-    if (!response.ok) {
-        throw new Error("テンプレートファイルの読み込みに失敗しました");
-    }
-    return response.arrayBuffer();
+function dateToExcelSerial(year, month, day) {
+    const target = Date.UTC(year, month - 1, day);
+    const base = Date.UTC(1900, 0, 1);
+    const days = Math.round((target - base) / 86400000);
+    return days + 2; // +1 for serial starting at 1, +1 for Lotus 1-2-3 bug
 }
 
-function writeHeaderInfo(worksheet, settings) {
-    if (settings.organization) {
-        worksheet.getCell("C3").value = settings.organization;
-    }
-    if (settings.position) {
-        worksheet.getCell("K3").value = settings.position;
-    }
-    if (settings.userName) {
-        worksheet.getCell("N3").value = settings.userName;
-    }
-}
+function buildCellMap(settings, year, month, csvData) {
+    const cells = {};
 
-function writeDateInfo(worksheet, year, month) {
-    const reiwaYear = year - 2018;
-    worksheet.getCell("B5").value = reiwaYear;
-    worksheet.getCell("D5").value = month;
+    // Header info (inline strings)
+    if (settings.organization) cells["C3"] = { type: "s", value: settings.organization };
+    if (settings.position) cells["K3"] = { type: "s", value: settings.position };
+    if (settings.userName) cells["N3"] = { type: "s", value: settings.userName };
 
-    // Set date values (overwrite formulas, same as Python version)
-    // Use noon UTC to avoid timezone offset shifting the date by one day
+    // Date info (numbers)
+    cells["B5"] = { type: "n", value: year - 2018 }; // Reiwa year
+    cells["D5"] = { type: "n", value: month };
+
+    // Highway info
+    cells["M5"] = { type: "s", value: settings.highwayFrom };
+    cells["P5"] = { type: "s", value: settings.highwayTo };
+    cells["M6"] = { type: "n", value: settings.oneWayFee };
+
+    // Date values (overwrite formulas with serial numbers)
     const lastDayNum = new Date(year, month, 0).getDate();
-    const firstDay = new Date(Date.UTC(year, month - 1, 1, 12, 0, 0));
-    const lastDay = new Date(Date.UTC(year, month - 1, lastDayNum, 12, 0, 0));
+    cells["E56"] = { type: "n", value: dateToExcelSerial(year, month, 1), removeFormula: true };
+    cells["E57"] = { type: "n", value: dateToExcelSerial(year, month, lastDayNum), removeFormula: true };
 
-    worksheet.getCell("E56").value = firstDay;
-    worksheet.getCell("E57").value = lastDay;
-}
-
-function writeHighwayInfo(worksheet, settings) {
-    worksheet.getCell("M5").value = settings.highwayFrom;
-    worksheet.getCell("P5").value = settings.highwayTo;
-    worksheet.getCell("M6").value = settings.oneWayFee;
-}
-
-function writeUsageData(worksheet, usageAmounts, year, month) {
-    const lastDayNum = new Date(year, month, 0).getDate();
-
+    // Usage data
+    const usageAmounts = calculateAllUsageAmounts(csvData, year, month);
     for (let day = 1; day <= lastDayNum; day++) {
-        const dayData = usageAmounts[day];
-        if (!dayData) continue;
+        const d = usageAmounts[day];
+        if (!d) continue;
+        if (!d.morningAmount && !d.afternoonAmount && !d.morningConfirmed && !d.afternoonConfirmed) continue;
 
-        const hasData =
-            dayData.morningAmount > 0 ||
-            dayData.afternoonAmount > 0 ||
-            dayData.morningConfirmed ||
-            dayData.afternoonConfirmed;
-        if (!hasData) continue;
-
+        let row, mC, mA, aC, aA;
         if (day <= 15) {
-            // Left side: days 1-15, rows 13-27
-            const row = day + 12;
-            writeDayRow(worksheet, row, dayData, "D", "E", "G", "H");
+            row = day + 12;
+            [mC, mA, aC, aA] = ["D", "E", "G", "H"];
         } else {
-            // Right side: days 16-31
-            const row = day <= 30 ? day - 15 + 12 : 28;
-            writeDayRow(worksheet, row, dayData, "L", "M", "O", "P");
+            row = day <= 30 ? day - 15 + 12 : 28;
+            [mC, mA, aC, aA] = ["L", "M", "O", "P"];
+        }
+
+        if (d.morningConfirmed) {
+            cells[`${mC}${row}`] = { type: "s", value: "○" };
+            cells[`${mA}${row}`] = { type: "n", value: d.morningAmount };
+        }
+        if (d.afternoonConfirmed) {
+            cells[`${aC}${row}`] = { type: "s", value: "○" };
+            cells[`${aA}${row}`] = { type: "n", value: d.afternoonAmount };
         }
     }
+
+    return cells;
 }
 
-function writeDayRow(worksheet, row, dayData, mornConfCol, mornAmtCol, aftConfCol, aftAmtCol) {
-    if (dayData.morningConfirmed) {
-        worksheet.getCell(`${mornConfCol}${row}`).value = dayData.morningConfirmed;
-        worksheet.getCell(`${mornAmtCol}${row}`).value = dayData.morningAmount;
-    }
-    if (dayData.afternoonConfirmed) {
-        worksheet.getCell(`${aftConfCol}${row}`).value = dayData.afternoonConfirmed;
-        worksheet.getCell(`${aftAmtCol}${row}`).value = dayData.afternoonAmount;
+function applyCellModifications(doc, cellMap) {
+    const rows = doc.getElementsByTagNameNS(XLSX_NS, "row");
+
+    for (const row of rows) {
+        const cells = row.getElementsByTagNameNS(XLSX_NS, "c");
+        for (const cell of cells) {
+            const ref = cell.getAttribute("r");
+            if (!cellMap[ref]) continue;
+
+            const mod = cellMap[ref];
+            const styleAttr = cell.getAttribute("s"); // preserve style
+
+            // Clear existing children (v, f, is)
+            while (cell.firstChild) cell.removeChild(cell.firstChild);
+
+            // Restore style
+            if (styleAttr) cell.setAttribute("s", styleAttr);
+
+            if (mod.type === "s") {
+                // Inline string
+                cell.setAttribute("t", "inlineStr");
+                const is = doc.createElementNS(XLSX_NS, "is");
+                const t = doc.createElementNS(XLSX_NS, "t");
+                t.textContent = mod.value;
+                is.appendChild(t);
+                cell.appendChild(is);
+            } else {
+                // Number
+                cell.removeAttribute("t");
+                const v = doc.createElementNS(XLSX_NS, "v");
+                v.textContent = String(mod.value);
+                cell.appendChild(v);
+            }
+
+            delete cellMap[ref]; // mark as processed
+        }
     }
 }
 
