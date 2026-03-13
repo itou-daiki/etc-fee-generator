@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高速道路利用実績簿生成</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛣️</text></svg>">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🛣️ 高速道路利用実績簿生成システム</h1>
+            <p class="subtitle">ETCカード利用明細からExcelファイルを自動生成</p>
+        </header>
+
+        <div class="layout">
+            <aside class="sidebar">
+                <button class="sidebar-toggle" id="sidebar-toggle" aria-label="設定を開く">⚙️ 設定</button>
+                <div class="sidebar-content" id="sidebar-content">
+                    <section>
+                        <h3>基本情報</h3>
+                        <div class="form-group">
+                            <label for="organization">所属</label>
+                            <input type="text" id="organization" value="日田高等学校">
+                        </div>
+                        <div class="form-group">
+                            <label for="position">職</label>
+                            <input type="text" id="position" value="教諭">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-name">氏名</label>
+                            <input type="text" id="user-name" value="伊藤大貴">
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3>利用区間設定</h3>
+                        <div class="form-group">
+                            <label for="highway-from">出発地点</label>
+                            <select id="highway-from"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="highway-to">到着地点</label>
+                            <select id="highway-to"></select>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3>料金設定</h3>
+                        <div class="form-group">
+                            <label for="one-way-fee">片道料金（円）</label>
+                            <input type="number" id="one-way-fee" value="2680" min="0" step="10">
+                        </div>
+                        <a href="https://search.w-nexco.co.jp/ic_input.php" target="_blank" rel="noopener" class="external-link">
+                            💡 NEXCO西日本 料金・ルート検索
+                        </a>
+                    </section>
+
+                    <section>
+                        <h3>現在の設定</h3>
+                        <div id="settings-display" class="settings-display"></div>
+                    </section>
+                </div>
+            </aside>
+
+            <main>
+                <div class="section">
+                    <h2>CSVファイルのアップロード</h2>
+                    <div class="dropzone" id="dropzone">
+                        <div class="dropzone-content">
+                            <span class="dropzone-icon">📁</span>
+                            <p id="dropzone-text">ファイルをドラッグ&ドロップ<br>またはクリックして選択</p>
+                            <p class="dropzone-hint">ETCカード利用明細CSVファイル</p>
+                        </div>
+                        <input type="file" id="csv-file" accept=".csv">
+                    </div>
+                    <div id="messages"></div>
+                </div>
+
+                <div id="data-section" class="hidden">
+                    <div class="section">
+                        <h2>データプレビュー</h2>
+                        <div id="preview-table"></div>
+
+                        <div class="stats">
+                            <div class="stat-card">
+                                <div class="label">総利用回数</div>
+                                <div class="value" id="total-records">-</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">総利用料金</div>
+                                <div class="value" id="total-fee">-</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">想定利用回数</div>
+                                <div class="value" id="expected-trips">-</div>
+                            </div>
+                        </div>
+
+                        <button id="generate-btn" class="btn-primary">
+                            利用実績簿を生成
+                        </button>
+
+                        <div id="loading" class="loading">
+                            <div class="spinner"></div>
+                            <p>生成中...</p>
+                        </div>
+
+                        <div id="download-section" class="hidden">
+                            <button id="download-btn" class="btn-download">
+                                📥 Excelファイルをダウンロード
+                            </button>
+                        </div>
+
+                        <div id="warnings" class="hidden">
+                            <div class="message warning">⚠️ 生成されたExcelファイルは必ず確認し、必要に応じて手動で調整してください。</div>
+                            <div class="message warning">⚠️ 利用確認の欄は、片道料金と異なる場合は空白になります。手動で入力して下さい。</div>
+                            <div class="message warning">⚠️ 証明書のPDFも一緒に提出するのを忘れずに！</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>使用方法</h2>
+                    <div class="usage-guide">
+                        <ol>
+                            <li>
+                                <strong>CSVファイルをアップロード</strong>
+                                <p>ETCカード利用明細のCSVファイルを選択</p>
+                                <p><a href="https://www2.etc-meisai.jp/etc/R?funccode=1013000000&nextfunc=1013000000" target="_blank" rel="noopener">ETC利用明細ダウンロード</a></p>
+                            </li>
+                            <li>
+                                <strong>設定を確認</strong>
+                                <p>出発地点・到着地点を選択し、片道料金を入力</p>
+                            </li>
+                            <li>
+                                <strong>実績簿を生成</strong>
+                                <p>「利用実績簿を生成」ボタンをクリックしてExcelファイルをダウンロード</p>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <footer>
+            <p>高速道路利用実績簿生成システム</p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@2.2.0/encoding.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
