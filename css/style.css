@@ -203,9 +203,11 @@ main {
 }
 
 .dropzone:hover,
-.dropzone.dragover {
+.dropzone.dragover,
+.dropzone:focus-visible {
     border-color: var(--primary);
     background: rgba(37, 99, 235, 0.03);
+    outline: none;
 }
 
 .dropzone-icon {
@@ -306,6 +308,12 @@ main {
 
 .btn-primary:hover {
     background: var(--primary-hover);
+}
+
+.btn-primary:focus-visible,
+.btn-download:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
 }
 
 .btn-primary:disabled {

@@ -10,6 +10,8 @@ const HIGHWAY_SECTIONS = [
 ].sort();
 
 const MONTHLY_ALLOWANCE = 112560;
+const REQUIRED_COLUMNS = ["利用年月日（自）", "時分（自）", "後納料金"];
+const STORAGE_KEY = "etc-fee-generator-settings";
 
 // ============================================================
 // State (immutable pattern - replaced, never mutated)
@@ -33,6 +35,7 @@ function updateState(partial) {
 
 document.addEventListener("DOMContentLoaded", () => {
     initializeSelects();
+    loadSavedSettings();
     setupEventListeners();
     updateSettingsDisplay();
 });
@@ -56,12 +59,20 @@ function setupEventListeners() {
 
     // Dropzone interactions
     dropzone.addEventListener("click", () => fileInput.click());
+    dropzone.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            fileInput.click();
+        }
+    });
     dropzone.addEventListener("dragover", (e) => {
         e.preventDefault();
         dropzone.classList.add("dragover");
     });
-    dropzone.addEventListener("dragleave", () => {
-        dropzone.classList.remove("dragover");
+    dropzone.addEventListener("dragleave", (e) => {
+        if (!dropzone.contains(e.relatedTarget)) {
+            dropzone.classList.remove("dragover");
+        }
     });
     dropzone.addEventListener("drop", (e) => {
         e.preventDefault();
@@ -79,20 +90,65 @@ function setupEventListeners() {
     // Generate button
     document.getElementById("generate-btn").addEventListener("click", generateExcel);
 
-    // Settings change listeners
-    const settingIds = [
-        "organization", "position", "user-name",
-        "highway-from", "highway-to", "one-way-fee",
-    ];
-    settingIds.forEach((id) => {
-        document.getElementById(id).addEventListener("input", updateSettingsDisplay);
+    // Settings change listeners (use "change" for <select>, "input" for text/number)
+    ["organization", "position", "user-name", "one-way-fee"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", onSettingsChange);
+    });
+    ["highway-from", "highway-to"].forEach((id) => {
+        document.getElementById(id).addEventListener("change", onSettingsChange);
     });
 
     // Mobile sidebar toggle
     const toggle = document.getElementById("sidebar-toggle");
     toggle.addEventListener("click", () => {
-        document.getElementById("sidebar-content").classList.toggle("open");
+        const content = document.getElementById("sidebar-content");
+        const isOpen = content.classList.toggle("open");
+        toggle.setAttribute("aria-expanded", String(isOpen));
     });
+}
+
+function onSettingsChange() {
+    updateSettingsDisplay();
+    saveSettings();
+    if (appState.csvData) {
+        showStats(appState.csvData);
+    }
+}
+
+// ============================================================
+// Settings Persistence (localStorage)
+// ============================================================
+
+function saveSettings() {
+    const settings = {
+        organization: document.getElementById("organization").value,
+        position: document.getElementById("position").value,
+        userName: document.getElementById("user-name").value,
+        highwayFrom: document.getElementById("highway-from").value,
+        highwayTo: document.getElementById("highway-to").value,
+        oneWayFee: document.getElementById("one-way-fee").value,
+    };
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch (_) {
+        // localStorage unavailable (private browsing, etc.)
+    }
+}
+
+function loadSavedSettings() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return;
+        const s = JSON.parse(saved);
+        if (s.organization) document.getElementById("organization").value = s.organization;
+        if (s.position) document.getElementById("position").value = s.position;
+        if (s.userName) document.getElementById("user-name").value = s.userName;
+        if (s.highwayFrom) document.getElementById("highway-from").value = s.highwayFrom;
+        if (s.highwayTo) document.getElementById("highway-to").value = s.highwayTo;
+        if (s.oneWayFee) document.getElementById("one-way-fee").value = s.oneWayFee;
+    } catch (_) {
+        // ignore parse errors or missing localStorage
+    }
 }
 
 // ============================================================
@@ -105,7 +161,7 @@ function updateSettingsDisplay() {
     const name = document.getElementById("user-name").value;
     const from = document.getElementById("highway-from").value;
     const to = document.getElementById("highway-to").value;
-    const fee = parseInt(document.getElementById("one-way-fee").value, 10) || 0;
+    const fee = parseOneWayFee();
 
     document.getElementById("settings-display").innerHTML = [
         org ? `<p><strong>所属:</strong> ${escapeHtml(org)}</p>` : "",
@@ -114,6 +170,11 @@ function updateSettingsDisplay() {
         `<p><strong>利用区間:</strong> ${escapeHtml(from)} ⇔ ${escapeHtml(to)}</p>`,
         `<p><strong>片道料金:</strong> ¥${fee.toLocaleString()}</p>`,
     ].join("");
+}
+
+function parseOneWayFee() {
+    const raw = parseInt(document.getElementById("one-way-fee").value, 10);
+    return isNaN(raw) ? 2680 : raw;
 }
 
 // ============================================================
@@ -134,6 +195,10 @@ async function handleFile(file) {
 
         // Detect encoding
         const detectedEncoding = Encoding.detect(uint8Array);
+        if (!detectedEncoding) {
+            showMessage("error", "ファイルのエンコーディングを検出できませんでした。");
+            return;
+        }
         showMessage("info", `検出されたエンコーディング: ${detectedEncoding}`);
 
         // Convert to Unicode string
@@ -158,6 +223,13 @@ async function handleFile(file) {
         const headers = result.meta.fields;
         const data = result.data;
 
+        // Validate required columns
+        const missingCols = REQUIRED_COLUMNS.filter((col) => !headers.includes(col));
+        if (missingCols.length > 0) {
+            showMessage("error", `必要な列が見つかりません: ${missingCols.join(", ")}`);
+            return;
+        }
+
         // Extract year/month
         const yearMonth = extractYearMonth(data);
         if (!yearMonth) {
@@ -173,7 +245,7 @@ async function handleFile(file) {
             generatedBlob: null,
         });
 
-        showMessage("success", `データ期間: ${yearMonth.year}年${yearMonth.month}月`);
+        showMessage("success", `データ期間: ${yearMonth.year}年${yearMonth.month}月 (${data.length}件)`);
 
         // Update UI
         showPreview(data, headers);
@@ -187,7 +259,6 @@ async function handleFile(file) {
             `📄 ${escapeHtml(file.name)}<br><span class="dropzone-hint">読み込み済み - 再選択するにはクリック</span>`;
     } catch (e) {
         showMessage("error", `ファイルの読み込みに失敗しました: ${e.message}`);
-        console.error(e);
     }
 }
 
@@ -315,7 +386,7 @@ async function generateExcel() {
         const cellMap = buildCellMap(settings, appState.year, appState.month, appState.csvData);
 
         // Apply modifications
-        applyCellModifications(doc, cellMap);
+        const transferredCount = applyCellModifications(doc, cellMap);
 
         // Serialize back to XML
         const serializer = new XMLSerializer();
@@ -333,11 +404,10 @@ async function generateExcel() {
         updateState({ generatedBlob: blob });
 
         setupDownloadButton(settings.userName);
-        showMessage("success", "利用実績簿が正常に生成されました！");
+        showMessage("success", `利用実績簿が正常に生成されました！（${transferredCount}日分のデータを転記）`);
         document.getElementById("warnings").classList.remove("hidden");
     } catch (e) {
         showMessage("error", `実績簿の生成に失敗しました: ${e.message}`);
-        console.error(e);
     } finally {
         generateBtn.disabled = false;
         loadingEl.classList.remove("active");
@@ -351,7 +421,7 @@ function readSettings() {
         userName: document.getElementById("user-name").value,
         highwayFrom: document.getElementById("highway-from").value,
         highwayTo: document.getElementById("highway-to").value,
-        oneWayFee: parseInt(document.getElementById("one-way-fee").value, 10) || 2680,
+        oneWayFee: parseOneWayFee(),
     });
 }
 
@@ -415,6 +485,8 @@ function buildCellMap(settings, year, month, csvData) {
 
 function applyCellModifications(doc, cellMap) {
     const rows = doc.getElementsByTagNameNS(XLSX_NS, "row");
+    let transferredDays = 0;
+    const dayRowsProcessed = new Set();
 
     for (const row of rows) {
         const cells = row.getElementsByTagNameNS(XLSX_NS, "c");
@@ -447,9 +519,17 @@ function applyCellModifications(doc, cellMap) {
                 cell.appendChild(v);
             }
 
+            // Track transferred day rows (D/G/L/O columns in rows 13-28)
+            const rowNum = parseInt(ref.replace(/[A-Z]/g, ""), 10);
+            if (rowNum >= 13 && rowNum <= 28 && /^[DGLO]\d+$/.test(ref)) {
+                dayRowsProcessed.add(rowNum);
+            }
+
             delete cellMap[ref]; // mark as processed
         }
     }
+
+    return dayRowsProcessed.size;
 }
 
 function setupDownloadButton(userName) {
@@ -493,7 +573,7 @@ function showPreview(data, headers) {
 }
 
 function showStats(data) {
-    const oneWayFee = parseInt(document.getElementById("one-way-fee").value, 10) || 2680;
+    const oneWayFee = parseOneWayFee();
 
     let totalFee = 0;
     data.forEach((row) => {
@@ -501,7 +581,7 @@ function showStats(data) {
         if (!isNaN(fee)) totalFee += fee;
     });
 
-    const expectedTrips = Math.floor(MONTHLY_ALLOWANCE / oneWayFee);
+    const expectedTrips = oneWayFee > 0 ? Math.floor(MONTHLY_ALLOWANCE / oneWayFee) : 0;
 
     document.getElementById("total-records").textContent = `${data.length}回`;
     document.getElementById("total-fee").textContent = `¥${totalFee.toLocaleString()}`;

@@ -16,7 +16,7 @@
 
         <div class="layout">
             <aside class="sidebar">
-                <button class="sidebar-toggle" id="sidebar-toggle" aria-label="設定を開く">⚙️ 設定</button>
+                <button class="sidebar-toggle" id="sidebar-toggle" aria-label="設定を開く" aria-expanded="false" aria-controls="sidebar-content">⚙️ 設定</button>
                 <div class="sidebar-content" id="sidebar-content">
                     <section>
                         <h3>基本情報</h3>
@@ -67,7 +67,7 @@
             <main>
                 <div class="section">
                     <h2>CSVファイルのアップロード</h2>
-                    <div class="dropzone" id="dropzone">
+                    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="CSVファイルを選択">
                         <div class="dropzone-content">
                             <span class="dropzone-icon">📁</span>
                             <p id="dropzone-text">ファイルをドラッグ&ドロップ<br>またはクリックして選択</p>
