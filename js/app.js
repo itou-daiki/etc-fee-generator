@@ -49,7 +49,7 @@ function initializeSelects() {
         toSelect.add(new Option(section, section));
     });
 
-    fromSelect.value = "大分米良";
+    fromSelect.value = "大分";
     toSelect.value = "日田";
 }
 
