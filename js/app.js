@@ -174,7 +174,7 @@ function updateSettingsDisplay() {
 
 function parseOneWayFee() {
     const raw = parseInt(document.getElementById("one-way-fee").value, 10);
-    return isNaN(raw) ? 2680 : raw;
+    return isNaN(raw) ? 2470 : raw;
 }
 
 // ============================================================
